@@ -44,14 +44,12 @@ def _init_local_orders_if_needed():
             "status_order", "nomor_resi"
         ]
         df = pd.DataFrame(columns=columns)
-        df["nomor_resi"] = df["nomor_resi"].astype(str)
         df.to_csv(path, index=False)
 
 # --- Data Access Functions ---
 
 def get_menu_df(force_reload: bool = False) -> pd.DataFrame:
     """Retrieve active menu catalog. Supports Google Sheets with automatic local CSV fallback."""
-    # Attempt Google Sheets if configured
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
@@ -59,6 +57,9 @@ def get_menu_df(force_reload: bool = False) -> pd.DataFrame:
             conn = st.connection("gsheets", type=GSheetsConnection)
             df = conn.read(worksheet="DB_Menu", ttl=0 if force_reload else 300)
             if df is not None and not df.empty:
+                df["harga"] = pd.to_numeric(df["harga"], errors="coerce").fillna(0).astype(int)
+                df["is_active"] = df["is_active"].astype(bool)
+                df["is_promo"] = df["is_promo"].astype(bool)
                 return df
     except Exception:
         pass
@@ -66,7 +67,6 @@ def get_menu_df(force_reload: bool = False) -> pd.DataFrame:
     # Local fallback
     _init_local_menu_if_needed()
     df = pd.read_csv(_get_menu_csv_path())
-    # Ensure types
     df["harga"] = pd.to_numeric(df["harga"], errors="coerce").fillna(0).astype(int)
     df["is_active"] = df["is_active"].astype(bool)
     df["is_promo"] = df["is_promo"].astype(bool)
@@ -116,7 +116,6 @@ def save_order(order_data: dict) -> str:
 
 def get_orders_df(force_reload: bool = False) -> pd.DataFrame:
     """Retrieve all orders dataframe."""
-    # Attempt Google Sheets if configured
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
@@ -124,20 +123,23 @@ def get_orders_df(force_reload: bool = False) -> pd.DataFrame:
             conn = st.connection("gsheets", type=GSheetsConnection)
             df = conn.read(worksheet="DB_Pesanan", ttl=0 if force_reload else 60)
             if df is not None and not df.empty:
+                df = df.fillna("")
+                if "total_harga" in df.columns:
+                    df["total_harga"] = pd.to_numeric(df["total_harga"], errors="coerce").fillna(0).astype(int)
                 return df
     except Exception:
         pass
 
     # Local fallback
     _init_local_orders_if_needed()
-    df = pd.read_csv(_get_orders_csv_path(), dtype=str)
+    df = pd.read_csv(_get_orders_csv_path(), dtype=str, keep_default_na=False)
+    df = df.fillna("")
     if "total_harga" in df.columns:
         df["total_harga"] = pd.to_numeric(df["total_harga"], errors="coerce").fillna(0).astype(int)
     return df
 
 def update_order_status(order_id: str, new_status: str, nomor_resi: str = "") -> bool:
     """Update order status and optional tracking number."""
-    # Attempt Google Sheets if configured
     try:
         import streamlit as st
         if hasattr(st, "secrets") and "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
@@ -158,7 +160,7 @@ def update_order_status(order_id: str, new_status: str, nomor_resi: str = "") ->
     # Local fallback
     _init_local_orders_if_needed()
     path = _get_orders_csv_path()
-    df = pd.read_csv(path, dtype=str)
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
     idx = df[df["order_id"] == order_id].index
     if len(idx) > 0:
         df.loc[idx, "status_order"] = new_status
@@ -191,7 +193,7 @@ def add_or_update_menu_item(menu_item: dict) -> bool:
     """Add a new dish or update existing menu item."""
     _init_local_menu_if_needed()
     path = _get_menu_csv_path()
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, keep_default_na=False)
 
     id_menu = menu_item.get("id_menu")
     if id_menu in df["id_menu"].values:
